@@ -1,0 +1,110 @@
+name: Buster Register (WARP)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 8 */13 * *"   
+
+jobs:
+  run:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      # =========================
+      # 🟡 0️⃣ 检出代码 
+      # =========================
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/pingmike-teohe-auto
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }} 
+          path: private
+
+      # =========================
+      # 🟡 Node 环境
+      # =========================
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # =========================
+      # 🟡 1️⃣ 安装系统依赖（音频）
+      # =========================
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb wget unzip curl jq p7zip-full \
+            pulseaudio alsa-utils ffmpeg
+
+          pulseaudio --start --exit-idle-time=-1 || true
+          pactl load-module module-null-sink sink_name=virtual_speaker || true
+          pactl set-default-sink virtual_speaker || true
+          pactl load-module module-virtual-source source_name=virtual_mic || true
+          pactl set-default-source virtual_mic || true
+
+      # =========================
+      # 🟡 2️⃣ Playwright 
+      # =========================
+      - name: Install playwright
+        working-directory: ./private
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      # =========================
+      # 🟡 3️⃣ 下载 Buster 
+      # =========================
+      - name: Download Buster
+        working-directory: ./private
+        run: |
+          mkdir -p extensions/buster
+          wget -O extensions/buster/buster.zip \
+            https://github.com/dessant/buster/releases/download/v3.1.0/buster_captcha_solver_for_humans-3.1.0-chrome.zip
+
+      - name: Unzip Buster
+        working-directory: ./private
+        run: |
+          mkdir -p extensions/buster/unpacked
+          7z x -y extensions/buster/buster.zip -oextensions/buster/unpacked
+
+      # =========================
+      # 🟡 4️⃣ 启用 WARP 
+      # =========================
+      - name: 创建WARP网络
+        uses: fscarmen/warp-on-actions@v1.3
+        with:
+          stack: dual
+          mode: client
+
+      # =========================
+      # 🟡 5️⃣ 调试 IP
+      # =========================
+      - name: Check IP
+        run: |
+          echo "🌍 当前 IP:"
+          curl -s https://api.ipify.org
+          echo
+          curl -s https://ipinfo.io
+          
+      # =========================
+      # 🟡 6️⃣ 运行脚本 
+      # =========================
+      - name: Run script
+        working-directory: ./private
+        run: |
+          mkdir -p screenshots
+          xvfb-run -a node register.js
+
+      # =========================
+      # 🟡 7️⃣ 上传截图 
+      # =========================
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: private/screenshots/*
